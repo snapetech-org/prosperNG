@@ -286,6 +286,13 @@ The July 2026 renderer profiling results, correctness constraints, rejected expe
 architecture step are recorded in
 [`RENDERER_PERFORMANCE_2026_07.md`](prosper/docs/RENDERER_PERFORMANCE_2026_07.md).
 
+## Compatibility development
+
+The current ProsperNG compatibility-development plan and the dated Prosper/Kyty anti-duplication
+audit are in [`docs/`](docs/). The local-only [`tools/kyty_triage`](tools/kyty_triage) harness turns
+complete emulator logs into structured blocker signatures before emulator behavior is changed; its
+tests run in CI and support both KytyPS5's layout and Prosper's nested source tree.
+
 ## License
 
 See [LICENSE](LICENSE) if present. Game files, assets, keys, and Sony SDK symbols are the property of

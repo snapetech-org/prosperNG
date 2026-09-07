@@ -10,6 +10,15 @@ on:
   pull_request:
 
 jobs:
+  log-triage:
+    name: Test local log triage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run triage tests
+        run: python3 tools/kyty_triage/test_kyty_triage.py
+
   host-sanitizers:
     name: Host ASan + UBSan
     runs-on: ubuntu-latest
