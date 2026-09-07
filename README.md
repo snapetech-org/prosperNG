@@ -12,6 +12,7 @@ console's OS, ABI, and GPU stack on the host — **not** by emulating a CPU.
 > titles currently reach different milestones and still expose substantial compatibility gaps. See
 > [Game compatibility](COMPATIBILITY.md) for title-by-title results and known blockers.
 Progress blog, newest first: [`BLOG.md`](BLOG.md).
+Join the community on [Discord](https://discord.gg/5PyXBfvS6T).
 
 ## Screenshots
 
