@@ -152,3 +152,7 @@ controller/keyboard frontend with:
 Interoperability & preservation research on legally-owned titles. `prosper` ships **no** Sony code,
 firmware, or keys — it reimplements published library interfaces clean-room style. It only operates on
 **already-unencrypted** dumps; it does not defeat DRM/encryption.
+
+## Local security scanning
+
+Run `./prosper/scripts/security-scan-local.sh` for local Semgrep CE and the Trivy scanners that fit this repository. The installed pre-commit hook runs Semgrep on staged source/config files only; Trivy runs on demand or in CI. Semgrep CE also runs in the existing CI workflow. See [security-scanning.md](prosper/docs/security-scanning.md). Use `./prosper/scripts/update-security-tools.sh` to refresh local scanner data and the Trivy database.

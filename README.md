@@ -291,3 +291,7 @@ architecture step are recorded in
 See [LICENSE](LICENSE) if present. Game files, assets, keys, and Sony SDK symbols are the property of
 their respective owners and are not redistributed here; the documentation screenshots are captures of
 prosper's own rendered output, shown for illustration.
+
+## Security scanning
+
+Run `./prosper/scripts/security-scan-local.sh` for local Semgrep Community Edition and applicable Trivy scans. The public Semgrep CI job runs alongside the existing CodeQL workflow. See [security-scanning.md](prosper/docs/security-scanning.md) for offline setup and updates; run `./prosper/scripts/install-security-hooks.sh` once to enable the staged Semgrep hook.

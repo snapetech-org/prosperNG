@@ -8,9 +8,40 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
+  schedule:
+    - cron: "37 8 * * 1"
+  workflow_dispatch:
 
 jobs:
+  semgrep-community:
+    name: Semgrep Community Edition
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Scan source with current Semgrep CE and p/default
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e EIO_BACKEND=posix \
+            -v "$GITHUB_WORKSPACE:/src" -w /src semgrep/semgrep:latest \
+            semgrep scan --config p/default --metrics=off --jobs 2 \
+              --json-output semgrep.json --sarif-output semgrep.sarif .
+      - name: Upload findings to GitHub code scanning
+        if: >-
+          always() && hashFiles('semgrep.sarif') != '' &&
+          (github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep-ce-community
+
   host-sanitizers:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     name: Host ASan + UBSan
     runs-on: ubuntu-latest
     steps:
@@ -31,6 +62,7 @@ jobs:
         run: ctest --test-dir prosper/build-sanitizers --no-tests=error --output-on-failure
 
   host-tsan:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     # DEBUGGING_WORKFLOWS.md states that BOTH sanitizer configurations must pass. The thread
     # configuration is the one that rots quietly -- its race control was already flaky under
     # optimization once -- so the claim is pinned here rather than left to local runs.
@@ -54,6 +86,7 @@ jobs:
         run: ctest --test-dir prosper/build-tsan --no-tests=error --output-on-failure
 
   linux:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     name: Linux
     runs-on: ubuntu-latest
 
@@ -234,6 +267,7 @@ jobs:
           python3 prosper/tools/vkval/vk_validation_scan.py --build-dir prosper/build-ci
 
   contribution-shape:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     name: Contribution shape
     runs-on: ubuntu-latest
     steps:
@@ -279,6 +313,7 @@ jobs:
             --base "origin/${{ github.base_ref }}"
 
   docs:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     name: Docs
     runs-on: ubuntu-latest
     # No `issues: read` here any more, and that is deliberate rather than an oversight: it existed
@@ -567,6 +602,7 @@ jobs:
           exit 0
 
   linux-app:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     name: Linux App
     runs-on: ubuntu-latest
 
@@ -603,6 +639,7 @@ jobs:
         run: cmake --build prosper/build-app --target prosper-app
 
   linux-app-package:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     name: Linux App Package
     # PINNED, deliberately not ubuntu-latest. No AppImage bundles libc, so this runner's glibc is
     # the minimum every user of the published artifact must have, and `ubuntu-latest` silently
@@ -689,6 +726,7 @@ jobs:
           retention-days: 14
 
   windows-mingw:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     name: Windows MinGW
     runs-on: windows-latest
 
@@ -729,6 +767,7 @@ jobs:
         run: ctest --test-dir prosper/build-ci -L timing-margin -V --no-tests=error
 
   windows-app:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     name: Windows App
     runs-on: windows-latest
 
@@ -847,6 +886,7 @@ jobs:
           retention-days: 14
 
   macos:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     name: macOS (x86_64 / Rosetta 2)
     runs-on: macos-latest
 
@@ -888,6 +928,7 @@ jobs:
         run: ctest --test-dir prosper/build-ci -L timing-margin -V --no-tests=error
 
   macos-app:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     name: macOS App (SDL3 + MoltenVK)
     runs-on: macos-latest
 
