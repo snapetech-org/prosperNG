@@ -1,3 +1,4 @@
+# ng-runner-policy: private-jit-only-v1
 name: CI
 
 on:
@@ -15,7 +16,7 @@ on:
 jobs:
   semgrep-community:
     name: Semgrep Community Edition
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-semgrep-community"]}}', github.run_id)) }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -43,7 +44,7 @@ jobs:
   host-sanitizers:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     name: Host ASan + UBSan
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-host-sanitizers"]}}', github.run_id)) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -67,7 +68,7 @@ jobs:
     # configuration is the one that rots quietly -- its race control was already flaky under
     # optimization once -- so the claim is pinned here rather than left to local runs.
     name: Host TSan
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-host-tsan"]}}', github.run_id)) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -88,7 +89,7 @@ jobs:
   linux:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     name: Linux
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-linux"]}}', github.run_id)) }}
 
     steps:
       - name: Checkout
@@ -269,7 +270,7 @@ jobs:
   contribution-shape:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     name: Contribution shape
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-contribution-shape"]}}', github.run_id)) }}
     steps:
       # Its own job, like Docs and for the same reason: it needs nothing built, finishes in seconds,
       # and a false positive here must not cost the build-and-test signal from an unrelated job.
@@ -315,7 +316,7 @@ jobs:
   docs:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     name: Docs
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-docs"]}}', github.run_id)) }}
     # No `issues: read` here any more, and that is deliberate rather than an oversight: it existed
     # solely for the PROGRESS_TRACKER.md staleness check, which now lives in `progress-tracker`.
     # Every remaining step in this job is local and offline, so the grant would be dead -- and a
@@ -520,7 +521,7 @@ jobs:
 
   progress-tracker:
     name: Progress tracker
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-progress-tracker"]}}', github.run_id)) }}
     # Master only. PROGRESS_TRACKER.md is generated from the tracker ISSUES, which live outside this
     # repository, so it can go stale with no commit at all -- and a merge that closes a cited issue
     # makes it stale at the moment of merging, which no pre-merge check can repair. Master therefore
@@ -604,7 +605,7 @@ jobs:
   linux-app:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     name: Linux App
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-linux-app"]}}', github.run_id)) }}
 
     # Builds the desktop frontend (prosper-app) with the SDL3 audio + gamepad frontends and Vulkan,
     # so the windowing/present/boot glue and the frontends stay compiling. Build-only: the app opens a
@@ -648,7 +649,7 @@ jobs:
     # brownout-based deprecation on 2026-09-17 and are unsupported from 2027-04-17, so pinning them
     # buys six weeks and then starts failing builds. 24.04 is the oldest runner that is not about to
     # break; verify-linux-app.sh asserts the resulting floor (2.39) so it cannot drift silently.
-    runs-on: ubuntu-24.04
+    runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-linux-app-package"]}}', github.run_id)) }}
 
     # Separate from `Linux App` on purpose. That job stays Debug and build-only, which is the cheap
     # compile signal for the frontends; this one is the release path -- Release build, real
@@ -728,7 +729,7 @@ jobs:
   windows-mingw:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     name: Windows MinGW
-    runs-on: windows-latest
+    runs-on: ${{ fromJSON(format('{{"group":"packer-windows","labels":["self-hosted","Windows","X64","packer-windows","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-windows-mingw"]}}', github.run_id)) }}
 
     steps:
       - name: Checkout
@@ -769,7 +770,7 @@ jobs:
   windows-app:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     name: Windows App
-    runs-on: windows-latest
+    runs-on: ${{ fromJSON(format('{{"group":"packer-windows","labels":["self-hosted","Windows","X64","packer-windows","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-windows-app"]}}', github.run_id)) }}
 
     # Build-only for the Vulkan window itself: hosted Windows runners do not expose a reliable GPU
     # or interactive desktop. The SDL audio/pad seams still run through their dummy-driver tests.
@@ -888,7 +889,7 @@ jobs:
   macos:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     name: macOS (x86_64 / Rosetta 2)
-    runs-on: macos-latest
+    runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","macOS","ARM64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-macos"]}}', github.run_id)) }}
 
     # GitHub's macos-latest runners are Apple Silicon (arm64). prosper has no ARM CPU backend — it
     # runs the guest's x86-64 code natively — so the whole app is built x86_64 (CMAKE_OSX_ARCHITECTURES)
@@ -930,7 +931,7 @@ jobs:
   macos-app:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     name: macOS App (SDL3 + MoltenVK)
-    runs-on: macos-latest
+    runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","macOS","ARM64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-macos-app"]}}', github.run_id)) }}
 
     # Builds the realtime window frontend (prosper-app) x86_64 against a UNIVERSAL MoltenVK, so the
     # SDL3-window/MoltenVK-present glue and the frontends stay compiling on a real macOS toolchain.
@@ -960,7 +961,7 @@ jobs:
     name: Publish Release
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [linux, linux-app, linux-app-package, windows-mingw, windows-app, macos, macos-app]
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-release"]}}', github.run_id)) }}
     permissions:
       contents: write
 
