@@ -1,20 +1,53 @@
 # ng-runner-policy: private-jit-only-v1
 name: CI
+run-name: action:${{ inputs.action || github.event_name }}:pool:${{ inputs.runner_pool || 'private' }}
 
 on:
   push:
     # `main` is the default and the only development branch. `master` was the pre-rewrite line;
     # it was deleted 2026-09-05 and archived as tag archive/pre-rewrite-master-2026-09-02 (#3333),
     # so listing it here would gate a ref that cannot exist.
-    branches: [main]
     tags: ['v*']
   pull_request:
+    types: [labeled]
   schedule:
     - cron: "37 8 * * 1"
   workflow_dispatch:
+    inputs:
+      action:
+        description: Action to perform
+        type: choice
+        options: [scan]
+        required: true
+      runner_pool:
+        description: Required private runner pool
+        type: choice
+        options: [private]
+        required: true
 
 jobs:
   semgrep-community:
+    if: >-
+      (
+        (
+        github.event_name == 'pull_request' &&
+        github.event.action == 'labeled' &&
+        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
+        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
+        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
+        github.event.pull_request.head.repo.full_name == github.repository
+        ) ||
+        (
+        github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
+        inputs.action == 'scan' &&
+        inputs.runner_pool == 'private'
+        ) ||
+        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
+      ) &&
+      (
+        github.event_name == 'workflow_dispatch' && inputs.action == 'scan' && inputs.runner_pool == 'private' && github.ref == 'refs/heads/main'
+      )
     name: Semgrep Community Edition
     runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-semgrep-community"]}}', github.run_id)) }}
     timeout-minutes: 30
@@ -42,7 +75,28 @@ jobs:
           category: semgrep-ce-community
 
   host-sanitizers:
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    # Keep external fork code off trusted JIT groups until its isolated route is authorized.
+    if: >-
+      (
+        (
+        github.event_name == 'pull_request' &&
+        github.event.action == 'labeled' &&
+        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
+        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
+        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
+        github.event.pull_request.head.repo.full_name == github.repository
+        ) ||
+        (
+        github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
+        inputs.action == 'scan' &&
+        inputs.runner_pool == 'private'
+        ) ||
+        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
+      ) &&
+      (
+        (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      )
     name: Host ASan + UBSan
     runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-host-sanitizers"]}}', github.run_id)) }}
     steps:
@@ -63,7 +117,28 @@ jobs:
         run: ctest --test-dir prosper/build-sanitizers --no-tests=error --output-on-failure
 
   host-tsan:
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    # Keep external fork code off trusted JIT groups until its isolated route is authorized.
+    if: >-
+      (
+        (
+        github.event_name == 'pull_request' &&
+        github.event.action == 'labeled' &&
+        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
+        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
+        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
+        github.event.pull_request.head.repo.full_name == github.repository
+        ) ||
+        (
+        github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
+        inputs.action == 'scan' &&
+        inputs.runner_pool == 'private'
+        ) ||
+        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
+      ) &&
+      (
+        (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      )
     # DEBUGGING_WORKFLOWS.md states that BOTH sanitizer configurations must pass. The thread
     # configuration is the one that rots quietly -- its race control was already flaky under
     # optimization once -- so the claim is pinned here rather than left to local runs.
@@ -87,7 +162,28 @@ jobs:
         run: ctest --test-dir prosper/build-tsan --no-tests=error --output-on-failure
 
   linux:
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    # Keep external fork code off trusted JIT groups until its isolated route is authorized.
+    if: >-
+      (
+        (
+        github.event_name == 'pull_request' &&
+        github.event.action == 'labeled' &&
+        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
+        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
+        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
+        github.event.pull_request.head.repo.full_name == github.repository
+        ) ||
+        (
+        github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
+        inputs.action == 'scan' &&
+        inputs.runner_pool == 'private'
+        ) ||
+        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
+      ) &&
+      (
+        (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      )
     name: Linux
     runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-linux"]}}', github.run_id)) }}
 
@@ -268,7 +364,28 @@ jobs:
           python3 prosper/tools/vkval/vk_validation_scan.py --build-dir prosper/build-ci
 
   contribution-shape:
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    # Keep external fork code off trusted JIT groups until its isolated route is authorized.
+    if: >-
+      (
+        (
+        github.event_name == 'pull_request' &&
+        github.event.action == 'labeled' &&
+        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
+        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
+        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
+        github.event.pull_request.head.repo.full_name == github.repository
+        ) ||
+        (
+        github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
+        inputs.action == 'scan' &&
+        inputs.runner_pool == 'private'
+        ) ||
+        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
+      ) &&
+      (
+        (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      )
     name: Contribution shape
     runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-contribution-shape"]}}', github.run_id)) }}
     steps:
@@ -314,7 +431,28 @@ jobs:
             --base "origin/${{ github.base_ref }}"
 
   docs:
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    # Keep external fork code off trusted JIT groups until its isolated route is authorized.
+    if: >-
+      (
+        (
+        github.event_name == 'pull_request' &&
+        github.event.action == 'labeled' &&
+        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
+        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
+        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
+        github.event.pull_request.head.repo.full_name == github.repository
+        ) ||
+        (
+        github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
+        inputs.action == 'scan' &&
+        inputs.runner_pool == 'private'
+        ) ||
+        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
+      ) &&
+      (
+        (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      )
     name: Docs
     runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-docs"]}}', github.run_id)) }}
     # No `issues: read` here any more, and that is deliberate rather than an oversight: it existed
@@ -527,7 +665,27 @@ jobs:
     # makes it stale at the moment of merging, which no pre-merge check can repair. Master therefore
     # regenerates it instead of failing -- for THAT cause. A generator or tracker error still fails
     # here, because it is author-fixable and leaves the file frozen if swallowed.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      (
+        (
+        github.event_name == 'pull_request' &&
+        github.event.action == 'labeled' &&
+        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
+        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
+        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
+        github.event.pull_request.head.repo.full_name == github.repository
+        ) ||
+        (
+        github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
+        inputs.action == 'scan' &&
+        inputs.runner_pool == 'private'
+        ) ||
+        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
+      ) &&
+      (
+        github.event_name == 'push' && github.ref == 'refs/heads/main'
+      )
     permissions:
       contents: write
       issues: read
@@ -603,7 +761,28 @@ jobs:
           exit 0
 
   linux-app:
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    # Keep external fork code off trusted JIT groups until its isolated route is authorized.
+    if: >-
+      (
+        (
+        github.event_name == 'pull_request' &&
+        github.event.action == 'labeled' &&
+        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
+        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
+        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
+        github.event.pull_request.head.repo.full_name == github.repository
+        ) ||
+        (
+        github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
+        inputs.action == 'scan' &&
+        inputs.runner_pool == 'private'
+        ) ||
+        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
+      ) &&
+      (
+        (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      )
     name: Linux App
     runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-linux-app"]}}', github.run_id)) }}
 
@@ -640,15 +819,31 @@ jobs:
         run: cmake --build prosper/build-app --target prosper-app
 
   linux-app-package:
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    # Keep external fork code off trusted JIT groups until its isolated route is authorized.
+    if: >-
+      (
+        (
+        github.event_name == 'pull_request' &&
+        github.event.action == 'labeled' &&
+        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
+        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
+        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
+        github.event.pull_request.head.repo.full_name == github.repository
+        ) ||
+        (
+        github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
+        inputs.action == 'scan' &&
+        inputs.runner_pool == 'private'
+        ) ||
+        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
+      ) &&
+      (
+        (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      )
     name: Linux App Package
-    # PINNED, deliberately not ubuntu-latest. No AppImage bundles libc, so this runner's glibc is
-    # the minimum every user of the published artifact must have, and `ubuntu-latest` silently
-    # follows the newest image -- it would raise that floor on some future Tuesday with no diff and
-    # no failing check. ubuntu-22.04 would give a lower floor (2.35), but the Ubuntu 22 images begin
-    # brownout-based deprecation on 2026-09-17 and are unsupported from 2027-04-17, so pinning them
-    # buys six weeks and then starts failing builds. 24.04 is the oldest runner that is not about to
-    # break; verify-linux-app.sh asserts the resulting floor (2.39) so it cannot drift silently.
+    # No AppImage bundles libc. Keep the published artifact's glibc floor explicit;
+    # verify-linux-app.sh asserts the resulting floor (2.39) so image drift is caught.
     runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-linux-app-package"]}}', github.run_id)) }}
 
     # Separate from `Linux App` on purpose. That job stays Debug and build-only, which is the cheap
@@ -727,7 +922,28 @@ jobs:
           retention-days: 14
 
   windows-mingw:
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    # Keep external fork code off trusted JIT groups until its isolated route is authorized.
+    if: >-
+      (
+        (
+        github.event_name == 'pull_request' &&
+        github.event.action == 'labeled' &&
+        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
+        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
+        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
+        github.event.pull_request.head.repo.full_name == github.repository
+        ) ||
+        (
+        github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
+        inputs.action == 'scan' &&
+        inputs.runner_pool == 'private'
+        ) ||
+        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
+      ) &&
+      (
+        (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      )
     name: Windows MinGW
     runs-on: ${{ fromJSON(format('{{"group":"packer-windows","labels":["self-hosted","Windows","X64","packer-windows","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-windows-mingw"]}}', github.run_id)) }}
 
@@ -768,7 +984,28 @@ jobs:
         run: ctest --test-dir prosper/build-ci -L timing-margin -V --no-tests=error
 
   windows-app:
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    # Keep external fork code off trusted JIT groups until its isolated route is authorized.
+    if: >-
+      (
+        (
+        github.event_name == 'pull_request' &&
+        github.event.action == 'labeled' &&
+        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
+        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
+        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
+        github.event.pull_request.head.repo.full_name == github.repository
+        ) ||
+        (
+        github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
+        inputs.action == 'scan' &&
+        inputs.runner_pool == 'private'
+        ) ||
+        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
+      ) &&
+      (
+        (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      )
     name: Windows App
     runs-on: ${{ fromJSON(format('{{"group":"packer-windows","labels":["self-hosted","Windows","X64","packer-windows","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-windows-app"]}}', github.run_id)) }}
 
@@ -887,14 +1124,34 @@ jobs:
           retention-days: 14
 
   macos:
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    # Keep external fork code off trusted JIT groups until its isolated route is authorized.
+    if: >-
+      (
+        (
+        github.event_name == 'pull_request' &&
+        github.event.action == 'labeled' &&
+        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
+        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
+        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
+        github.event.pull_request.head.repo.full_name == github.repository
+        ) ||
+        (
+        github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
+        inputs.action == 'scan' &&
+        inputs.runner_pool == 'private'
+        ) ||
+        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
+      ) &&
+      (
+        (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      )
     name: macOS (x86_64 / Rosetta 2)
-    runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","macOS","ARM64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-macos"]}}', github.run_id)) }}
+    runs-on: ${{ fromJSON(format('{{"group":"private-apple-builds","labels":["self-hosted","macOS","ARM64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-macos","private-apple"]}}', github.run_id)) }}
 
-    # GitHub's macos-latest runners are Apple Silicon (arm64). prosper has no ARM CPU backend — it
-    # runs the guest's x86-64 code natively — so the whole app is built x86_64 (CMAKE_OSX_ARCHITECTURES)
-    # and its tests run under Rosetta 2, exactly the supported macOS configuration (see docs/PORTING.md).
-    # This exercises the Darwin guest-execution substrate (src/host/platform/posix_shim.hpp), not just a compile.
+    # The app has no ARM CPU backend, so build its x86-64 guest and run it under Rosetta 2
+    # on the native Apple ARM64 JIT runner, as documented in docs/PORTING.md.
+    # This exercises the Darwin guest-execution substrate (src/host/platform/posix_shim.hpp).
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -929,9 +1186,30 @@ jobs:
         run: ctest --test-dir prosper/build-ci -L timing-margin -V --no-tests=error
 
   macos-app:
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    # Keep external fork code off trusted JIT groups until its isolated route is authorized.
+    if: >-
+      (
+        (
+        github.event_name == 'pull_request' &&
+        github.event.action == 'labeled' &&
+        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
+        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
+        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
+        github.event.pull_request.head.repo.full_name == github.repository
+        ) ||
+        (
+        github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
+        inputs.action == 'scan' &&
+        inputs.runner_pool == 'private'
+        ) ||
+        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
+      ) &&
+      (
+        (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      )
     name: macOS App (SDL3 + MoltenVK)
-    runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","macOS","ARM64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-macos-app"]}}', github.run_id)) }}
+    runs-on: ${{ fromJSON(format('{{"group":"private-apple-builds","labels":["self-hosted","macOS","ARM64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-macos-app","private-apple"]}}', github.run_id)) }}
 
     # Builds the realtime window frontend (prosper-app) x86_64 against a UNIVERSAL MoltenVK, so the
     # SDL3-window/MoltenVK-present glue and the frontends stay compiling on a real macOS toolchain.
@@ -959,7 +1237,27 @@ jobs:
 
   release:
     name: Publish Release
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      (
+        (
+        github.event_name == 'pull_request' &&
+        github.event.action == 'labeled' &&
+        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
+        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
+        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
+        github.event.pull_request.head.repo.full_name == github.repository
+        ) ||
+        (
+        github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
+        inputs.action == 'scan' &&
+        inputs.runner_pool == 'private'
+        ) ||
+        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
+      ) &&
+      (
+        github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+      )
     needs: [linux, linux-app, linux-app-package, windows-mingw, windows-app, macos, macos-app]
     runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-release"]}}', github.run_id)) }}
     permissions:
