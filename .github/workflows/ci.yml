@@ -1,13 +1,15 @@
+# packer-windows-jit-v1
 # ng-runner-policy: private-jit-only-v1
 name: CI
-run-name: action:${{ inputs.action || github.event_name }}:pool:${{ inputs.runner_pool || 'private' }}
-
+run-name: >-
+  ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') &&
+      format('action:scan:pool:private:tag:{0}', github.ref_name) ||
+      github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/') &&
+      format('action:{0}:pool:{1}:tag:{2}', inputs.action || 'ci', inputs.runner_pool || 'private', github.ref_name) ||
+      github.event_name == 'workflow_dispatch' &&
+      format('action:{0}:pool:{1}', inputs.action || 'ci', inputs.runner_pool || 'private') || format('action:scan:pool:private') }}
 on:
-  push:
-    # `main` is the default and the only development branch. `master` was the pre-rewrite line;
-    # it was deleted 2026-09-05 and archived as tag archive/pre-rewrite-master-2026-09-02 (#3333),
-    # so listing it here would gate a ref that cannot exist.
-    tags: ['v*']
+
   pull_request:
     types: [labeled]
   schedule:
@@ -945,7 +947,7 @@ jobs:
         (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
       )
     name: Windows MinGW
-    runs-on: ${{ fromJSON(format('{{"group":"packer-windows","labels":["self-hosted","Windows","X64","packer-windows","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-windows-mingw"]}}', github.run_id)) }}
+    runs-on: ${{ fromJSON(format('{{"group":"packer-windows","labels":["self-hosted","Windows","X64","on-demand","packer-windows","prosperNG","gha-{0}-windows-mingw"]}}', github.run_id)) }}
 
     steps:
       - name: Checkout
@@ -982,7 +984,6 @@ jobs:
       - name: Report the measured wait margins
         shell: msys2 {0}
         run: ctest --test-dir prosper/build-ci -L timing-margin -V --no-tests=error
-
   windows-app:
     # Keep external fork code off trusted JIT groups until its isolated route is authorized.
     if: >-
@@ -1007,7 +1008,7 @@ jobs:
         (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
       )
     name: Windows App
-    runs-on: ${{ fromJSON(format('{{"group":"packer-windows","labels":["self-hosted","Windows","X64","packer-windows","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-windows-app"]}}', github.run_id)) }}
+    runs-on: ${{ fromJSON(format('{{"group":"packer-windows","labels":["self-hosted","Windows","X64","on-demand","packer-windows","prosperNG","gha-{0}-windows-app"]}}', github.run_id)) }}
 
     # Build-only for the Vulkan window itself: hosted Windows runners do not expose a reliable GPU
     # or interactive desktop. The SDL audio/pad seams still run through their dummy-driver tests.
@@ -1122,7 +1123,6 @@ jobs:
             prosper-windows-x64.zip.sha256
           if-no-files-found: error
           retention-days: 14
-
   macos:
     # Keep external fork code off trusted JIT groups until its isolated route is authorized.
     if: >-
