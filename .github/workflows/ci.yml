@@ -2,54 +2,160 @@
 # ng-runner-policy: private-jit-only-v1
 name: CI
 run-name: >-
-  ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') &&
+  ${{ github.event_name == 'workflow_dispatch' && inputs.pr_number != '' &&
+      format('owner-pr:{0}:{1}:{2}:action:{3}:pool:{4}', inputs.pr_number, inputs.pr_sha, inputs.target_run_id, inputs.action_tag, inputs.runner_pool_tag) ||
+      github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') &&
       format('action:scan:pool:private:tag:{0}', github.ref_name) ||
       github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/') &&
-      format('action:{0}:pool:{1}:tag:{2}', inputs.action || 'ci', inputs.runner_pool || 'private', github.ref_name) ||
+      format('action:{0}:pool:{1}:tag:{2}', inputs.action_tag || 'ci', inputs.runner_pool_tag || 'private', github.ref_name) ||
       github.event_name == 'workflow_dispatch' &&
-      format('action:{0}:pool:{1}', inputs.action || 'ci', inputs.runner_pool || 'private') || format('action:scan:pool:private') }}
+      format('action:{0}:pool:{1}', inputs.action_tag || 'ci', inputs.runner_pool_tag || 'private') ||
+      github.event_name == 'pull_request_target' && format('action:ci:pool:private') ||
+      format('action:scan:pool:private') }}
 on:
-
-  pull_request:
+  pull_request_target:
     types: [labeled]
+    branches: [main]
   schedule:
     - cron: "37 8 * * 1"
+  push:
+    tags: ['v*']
   workflow_dispatch:
     inputs:
-      action:
-        description: Action to perform
+      action_tag:
+        options: [ci, scan]
+        description: Required workflow action tag
         type: choice
-        options: [scan]
         required: true
-      runner_pool:
-        description: Required private runner pool
-        type: choice
+      runner_pool_tag:
         options: [private]
+        description: Required private JIT runner pool tag
+        type: choice
         required: true
+      pr_number:
+        description: Trusted owner PR number from the metadata-only event
+        type: string
+        required: false
+      pr_sha:
+        description: Exact trusted owner PR head SHA
+        type: string
+        required: false
+      pr_base_sha:
+        description: Exact PR base SHA from the metadata-only event
+        type: string
+        required: false
+      pr_author:
+        description: PR author copied from the metadata-only event
+        type: string
+        required: false
+      pr_repository:
+        description: PR head repository copied from the metadata-only event
+        type: string
+        required: false
+      target_run_id:
+        description: Metadata-only pull_request_target run ID
+        type: string
+        required: false
+permissions:
+  contents: read
 
 jobs:
+  dispatch-owner-pr:
+    name: Dispatch trusted owner PR validation
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      github.event.action == 'labeled' &&
+      (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
+      contains(github.event.pull_request.labels.*.name, 'action:ci') &&
+      contains(github.event.pull_request.labels.*.name, 'pool:private') &&
+      github.actor == 'snapetech' &&
+      github.event.pull_request.user.login == 'snapetech' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.repo.id == github.repository_id &&
+      github.event.pull_request.base.repo.id == github.repository_id &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-packer","ng-main-run-{0}","gha-{0}-owner-pr-dispatcher"]}}', github.run_id)) }}
+    permissions:
+      actions: write
+      contents: none
+    steps:
+      - name: Dispatch PR-head validation from main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_REPOSITORY_ID: ${{ github.event.pull_request.head.repo.id }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          TARGET_RUN_ID: ${{ github.run_id }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REPOSITORY_ID: ${{ github.repository_id }}
+          PR_LABELS_JSON: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          python3 - <<'ROUTE_VALIDATION_PY'
+          import json
+          import os
+          import re
+          from urllib.request import Request, urlopen
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          number = os.environ["PR_NUMBER"]
+          sha = os.environ["PR_SHA"]
+          base_sha = os.environ["PR_BASE_SHA"]
+          pr_repository = os.environ["PR_REPOSITORY"]
+          pr_author = os.environ["PR_AUTHOR"]
+          target_run_id = os.environ["TARGET_RUN_ID"]
+          labels = json.loads(os.environ["PR_LABELS_JSON"])
+          action_labels = [label for label in labels if isinstance(label, str) and label.startswith("action:")]
+          pool_labels = [label for label in labels if isinstance(label, str) and label.startswith("pool:")]
+          if action_labels != ["action:ci"] or pool_labels != ["pool:private"]:
+              raise SystemExit("add exactly action:ci and pool:private labels")
+          if os.environ["GITHUB_REPOSITORY_ID"] != os.environ["PR_REPOSITORY_ID"]:
+              raise SystemExit("pull request head repository ID does not match this repository")
+          if pr_author != "snapetech" or pr_repository.lower() != repository.lower():
+              raise SystemExit("private validation only accepts the repository owner's pull requests")
+          if not re.fullmatch(r"[1-9][0-9]*", number):
+              raise SystemExit("invalid pull request number")
+          if not re.fullmatch(r"[0-9a-f]{40}", sha) or not re.fullmatch(r"[0-9a-f]{40}", base_sha):
+              raise SystemExit("invalid pull request head or base SHA")
+          if not re.fullmatch(r"[1-9][0-9]*", target_run_id):
+              raise SystemExit("invalid metadata run ID")
+
+          payload = json.dumps({
+              "ref": "main",
+              "inputs": {
+                  "action_tag": "ci",
+                  "runner_pool_tag": "private",
+                  "pr_number": number,
+                  "pr_sha": sha,
+                  "pr_base_sha": base_sha,
+                  "target_run_id": target_run_id,
+                  "pr_author": pr_author,
+                  "pr_repository": pr_repository,
+              },
+          }).encode("utf-8")
+          request = Request(
+              f"https://api.github.com/repos/{repository}/actions/workflows/ci.yml/dispatches",
+              data=payload,
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                  "Content-Type": "application/json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+              method="POST",
+          )
+          with urlopen(request, timeout=20) as response:
+              if response.status != 204:
+                  raise SystemExit(f"workflow dispatch returned HTTP {response.status}")
+          ROUTE_VALIDATION_PY
+
   semgrep-community:
     if: >-
-      (
-        (
-        github.event_name == 'pull_request' &&
-        github.event.action == 'labeled' &&
-        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
-        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
-        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
-        github.event.pull_request.head.repo.full_name == github.repository
-        ) ||
-        (
-        github.event_name == 'workflow_dispatch' &&
-        github.ref == 'refs/heads/main' &&
-        inputs.action == 'scan' &&
-        inputs.runner_pool == 'private'
-        ) ||
-        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
-      ) &&
-      (
-        github.event_name == 'workflow_dispatch' && inputs.action == 'scan' && inputs.runner_pool == 'private' && github.ref == 'refs/heads/main'
-      )
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.action_tag == 'scan' && inputs.runner_pool_tag == 'private'
     name: Semgrep Community Edition
     runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-semgrep-community"]}}', github.run_id)) }}
     timeout-minutes: 30
@@ -80,30 +186,23 @@ jobs:
     # Keep external fork code off trusted JIT groups until its isolated route is authorized.
     if: >-
       (
-        (
-        github.event_name == 'pull_request' &&
-        github.event.action == 'labeled' &&
-        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
-        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
-        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
-        github.event.pull_request.head.repo.full_name == github.repository
-        ) ||
-        (
         github.event_name == 'workflow_dispatch' &&
         github.ref == 'refs/heads/main' &&
-        inputs.action == 'scan' &&
-        inputs.runner_pool == 'private'
-        ) ||
-        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
-      ) &&
-      (
-        (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-      )
+        inputs.action_tag == 'ci' && inputs.runner_pool_tag == 'private' &&
+        (
+          (github.actor == 'snapetech' && inputs.pr_number == '' && inputs.pr_sha == '' && inputs.pr_base_sha == '' && inputs.target_run_id == '' && inputs.pr_author == '' && inputs.pr_repository == '') ||
+          (github.actor == 'github-actions[bot]' && inputs.action_tag == 'ci' && inputs.runner_pool_tag == 'private' && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.pr_base_sha != '' && inputs.target_run_id != '' && inputs.pr_author == 'snapetech' && inputs.pr_repository == github.repository)
+        )
+      ) ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     name: Host ASan + UBSan
     runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-host-sanitizers"]}}', github.run_id)) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.pr_sha != '' && inputs.pr_sha || github.sha }}
+          persist-credentials: false
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -122,33 +221,23 @@ jobs:
     # Keep external fork code off trusted JIT groups until its isolated route is authorized.
     if: >-
       (
-        (
-        github.event_name == 'pull_request' &&
-        github.event.action == 'labeled' &&
-        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
-        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
-        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
-        github.event.pull_request.head.repo.full_name == github.repository
-        ) ||
-        (
         github.event_name == 'workflow_dispatch' &&
         github.ref == 'refs/heads/main' &&
-        inputs.action == 'scan' &&
-        inputs.runner_pool == 'private'
-        ) ||
-        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
-      ) &&
-      (
-        (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-      )
-    # DEBUGGING_WORKFLOWS.md states that BOTH sanitizer configurations must pass. The thread
-    # configuration is the one that rots quietly -- its race control was already flaky under
-    # optimization once -- so the claim is pinned here rather than left to local runs.
+        inputs.action_tag == 'ci' && inputs.runner_pool_tag == 'private' &&
+        (
+          (github.actor == 'snapetech' && inputs.pr_number == '' && inputs.pr_sha == '' && inputs.pr_base_sha == '' && inputs.target_run_id == '' && inputs.pr_author == '' && inputs.pr_repository == '') ||
+          (github.actor == 'github-actions[bot]' && inputs.action_tag == 'ci' && inputs.runner_pool_tag == 'private' && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.pr_base_sha != '' && inputs.target_run_id != '' && inputs.pr_author == 'snapetech' && inputs.pr_repository == github.repository)
+        )
+      ) ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     name: Host TSan
     runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-host-tsan"]}}', github.run_id)) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.pr_sha != '' && inputs.pr_sha || github.sha }}
+          persist-credentials: false
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -167,31 +256,24 @@ jobs:
     # Keep external fork code off trusted JIT groups until its isolated route is authorized.
     if: >-
       (
-        (
-        github.event_name == 'pull_request' &&
-        github.event.action == 'labeled' &&
-        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
-        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
-        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
-        github.event.pull_request.head.repo.full_name == github.repository
-        ) ||
-        (
         github.event_name == 'workflow_dispatch' &&
         github.ref == 'refs/heads/main' &&
-        inputs.action == 'scan' &&
-        inputs.runner_pool == 'private'
-        ) ||
-        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
-      ) &&
-      (
-        (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-      )
+        inputs.action_tag == 'ci' && inputs.runner_pool_tag == 'private' &&
+        (
+          (github.actor == 'snapetech' && inputs.pr_number == '' && inputs.pr_sha == '' && inputs.pr_base_sha == '' && inputs.target_run_id == '' && inputs.pr_author == '' && inputs.pr_repository == '') ||
+          (github.actor == 'github-actions[bot]' && inputs.action_tag == 'ci' && inputs.runner_pool_tag == 'private' && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.pr_base_sha != '' && inputs.target_run_id != '' && inputs.pr_author == 'snapetech' && inputs.pr_repository == github.repository)
+        )
+      ) ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     name: Linux
     runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-linux"]}}', github.run_id)) }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.pr_sha != '' && inputs.pr_sha || github.sha }}
+          persist-credentials: false
 
       # spirv-tools is what makes the `spv_validate` test a validation gate rather than a
       # recompile smoke test. It is on no GitHub runner image, and this workflow never installed
@@ -369,25 +451,15 @@ jobs:
     # Keep external fork code off trusted JIT groups until its isolated route is authorized.
     if: >-
       (
-        (
-        github.event_name == 'pull_request' &&
-        github.event.action == 'labeled' &&
-        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
-        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
-        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
-        github.event.pull_request.head.repo.full_name == github.repository
-        ) ||
-        (
         github.event_name == 'workflow_dispatch' &&
         github.ref == 'refs/heads/main' &&
-        inputs.action == 'scan' &&
-        inputs.runner_pool == 'private'
-        ) ||
-        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
-      ) &&
-      (
-        (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-      )
+        inputs.action_tag == 'ci' && inputs.runner_pool_tag == 'private' &&
+        (
+          (github.actor == 'snapetech' && inputs.pr_number == '' && inputs.pr_sha == '' && inputs.pr_base_sha == '' && inputs.target_run_id == '' && inputs.pr_author == '' && inputs.pr_repository == '') ||
+          (github.actor == 'github-actions[bot]' && inputs.action_tag == 'ci' && inputs.runner_pool_tag == 'private' && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.pr_base_sha != '' && inputs.target_run_id != '' && inputs.pr_author == 'snapetech' && inputs.pr_repository == github.repository)
+        )
+      ) ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     name: Contribution shape
     runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-contribution-shape"]}}', github.run_id)) }}
     steps:
@@ -413,6 +485,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.pr_sha != '' && inputs.pr_sha || github.sha }}
+          persist-credentials: false
           fetch-depth: 0
 
       # Runs before the check itself: the selftest holds hand-written violating AND compliant inputs,
@@ -423,38 +497,29 @@ jobs:
         run: python3 prosper/tools/ci/check_contribution_shape.py --selftest
 
       - name: Check the contribution shape of this PR
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'workflow_dispatch' && inputs.pr_sha != '' && inputs.pr_base_sha != ''
+        env:
+          PR_BASE_SHA: ${{ inputs.pr_base_sha }}
         run: |
-          # No --depth here: `fetch-depth: 0` above already fetched full history, and
-          # `--depth=0` is rejected outright (`fatal: depth 0 is not a positive number`) --
-          # which is how this job failed on its own first run.
-          git fetch --no-tags origin "${{ github.base_ref }}"
+          if ! git cat-file -e "$PR_BASE_SHA^{commit}" 2>/dev/null; then
+            git fetch --no-tags origin "$PR_BASE_SHA"
+          fi
           python3 prosper/tools/ci/check_contribution_shape.py --github \
-            --base "origin/${{ github.base_ref }}"
+            --base "$PR_BASE_SHA"
 
   docs:
     # Keep external fork code off trusted JIT groups until its isolated route is authorized.
     if: >-
       (
-        (
-        github.event_name == 'pull_request' &&
-        github.event.action == 'labeled' &&
-        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
-        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
-        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
-        github.event.pull_request.head.repo.full_name == github.repository
-        ) ||
-        (
         github.event_name == 'workflow_dispatch' &&
         github.ref == 'refs/heads/main' &&
-        inputs.action == 'scan' &&
-        inputs.runner_pool == 'private'
-        ) ||
-        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
-      ) &&
-      (
-        (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-      )
+        inputs.action_tag == 'ci' && inputs.runner_pool_tag == 'private' &&
+        (
+          (github.actor == 'snapetech' && inputs.pr_number == '' && inputs.pr_sha == '' && inputs.pr_base_sha == '' && inputs.target_run_id == '' && inputs.pr_author == '' && inputs.pr_repository == '') ||
+          (github.actor == 'github-actions[bot]' && inputs.action_tag == 'ci' && inputs.runner_pool_tag == 'private' && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.pr_base_sha != '' && inputs.target_run_id != '' && inputs.pr_author == 'snapetech' && inputs.pr_repository == github.repository)
+        )
+      ) ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     name: Docs
     runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-docs"]}}', github.run_id)) }}
     # No `issues: read` here any more, and that is deliberate rather than an oversight: it existed
@@ -466,14 +531,13 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        # fetch-depth: 2 is LOAD-BEARING, not tidiness. The numbering gate's deleted-row check
-        # needs the base's copy of the file, and reads it as `HEAD^1` -- which is the base commit
-        # on a `pull_request` merge ref and the previous master on a push. At the default depth 1
-        # the parent is not fetched, `git show HEAD^1:<file>` fails, and the step below fails with
-        # it (deliberately: a baseline that cannot be produced must not degrade to a green run).
+        # Owner-PR validation checks out the exact head SHA and uses the event's exact base SHA.
+        # Manual and tag runs fall back to the checked-out commit's first parent.
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          ref: ${{ inputs.pr_sha != '' && inputs.pr_sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
 
       # Its own job rather than a step of Linux: a false positive here must not cost the build and
       # test signal from an unrelated job. It needs nothing built and finishes in seconds.
@@ -513,10 +577,20 @@ jobs:
       # `ref:` checks out refs/pull/N/merge, whose first parent is the base) and the previous master
       # on a push, so the same expression is right for both the pre-merge and the post-merge run.
       - name: Verify the numbered doc tables are intact
+        env:
+          PR_BASE_SHA: ${{ inputs.pr_base_sha }}
         run: |
           set -o pipefail
           F=prosper/docs/GAME_COMPAT_ORCHESTRATION.md
-          git show "HEAD^1:$F" > "$RUNNER_TEMP/orchestration-base.md"
+          if [[ -n "$PR_BASE_SHA" ]]; then
+            if ! git cat-file -e "$PR_BASE_SHA^{commit}" 2>/dev/null; then
+              git fetch --no-tags origin "$PR_BASE_SHA"
+            fi
+            base_ref="$PR_BASE_SHA"
+          else
+            base_ref="HEAD^1"
+          fi
+          git show "$base_ref:$F" > "$RUNNER_TEMP/orchestration-base.md"
           python3 prosper/tools/docs/check_numbered_table.py --github --ordered \
             --table-header Instrument --baseline "$RUNNER_TEMP/orchestration-base.md" "$F"
 
@@ -680,8 +754,8 @@ jobs:
         (
         github.event_name == 'workflow_dispatch' &&
         github.ref == 'refs/heads/main' &&
-        inputs.action == 'scan' &&
-        inputs.runner_pool == 'private'
+        inputs.action_tag == 'scan' &&
+        inputs.runner_pool_tag == 'private'
         ) ||
         (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
       ) &&
@@ -766,25 +840,15 @@ jobs:
     # Keep external fork code off trusted JIT groups until its isolated route is authorized.
     if: >-
       (
-        (
-        github.event_name == 'pull_request' &&
-        github.event.action == 'labeled' &&
-        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
-        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
-        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
-        github.event.pull_request.head.repo.full_name == github.repository
-        ) ||
-        (
         github.event_name == 'workflow_dispatch' &&
         github.ref == 'refs/heads/main' &&
-        inputs.action == 'scan' &&
-        inputs.runner_pool == 'private'
-        ) ||
-        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
-      ) &&
-      (
-        (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-      )
+        inputs.action_tag == 'ci' && inputs.runner_pool_tag == 'private' &&
+        (
+          (github.actor == 'snapetech' && inputs.pr_number == '' && inputs.pr_sha == '' && inputs.pr_base_sha == '' && inputs.target_run_id == '' && inputs.pr_author == '' && inputs.pr_repository == '') ||
+          (github.actor == 'github-actions[bot]' && inputs.action_tag == 'ci' && inputs.runner_pool_tag == 'private' && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.pr_base_sha != '' && inputs.target_run_id != '' && inputs.pr_author == 'snapetech' && inputs.pr_repository == github.repository)
+        )
+      ) ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     name: Linux App
     runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-linux-app"]}}', github.run_id)) }}
 
@@ -794,6 +858,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.pr_sha != '' && inputs.pr_sha || github.sha }}
+          persist-credentials: false
 
       - name: Install dependencies
         # Vulkan (loader + FindVulkan) for the renderer; Wayland/X11 dev libs so the fetched SDL3
@@ -824,25 +891,15 @@ jobs:
     # Keep external fork code off trusted JIT groups until its isolated route is authorized.
     if: >-
       (
-        (
-        github.event_name == 'pull_request' &&
-        github.event.action == 'labeled' &&
-        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
-        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
-        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
-        github.event.pull_request.head.repo.full_name == github.repository
-        ) ||
-        (
         github.event_name == 'workflow_dispatch' &&
         github.ref == 'refs/heads/main' &&
-        inputs.action == 'scan' &&
-        inputs.runner_pool == 'private'
-        ) ||
-        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
-      ) &&
-      (
-        (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-      )
+        inputs.action_tag == 'ci' && inputs.runner_pool_tag == 'private' &&
+        (
+          (github.actor == 'snapetech' && inputs.pr_number == '' && inputs.pr_sha == '' && inputs.pr_base_sha == '' && inputs.target_run_id == '' && inputs.pr_author == '' && inputs.pr_repository == '') ||
+          (github.actor == 'github-actions[bot]' && inputs.action_tag == 'ci' && inputs.runner_pool_tag == 'private' && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.pr_base_sha != '' && inputs.target_run_id != '' && inputs.pr_author == 'snapetech' && inputs.pr_repository == github.repository)
+        )
+      ) ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     name: Linux App Package
     # No AppImage bundles libc. Keep the published artifact's glibc floor explicit;
     # verify-linux-app.sh asserts the resulting floor (2.39) so image drift is caught.
@@ -854,6 +911,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.pr_sha != '' && inputs.pr_sha || github.sha }}
+          persist-credentials: false
 
       - name: Install dependencies
         # The build set is identical to the Linux App job: the packaged binary must be the one that
@@ -927,31 +987,24 @@ jobs:
     # Keep external fork code off trusted JIT groups until its isolated route is authorized.
     if: >-
       (
-        (
-        github.event_name == 'pull_request' &&
-        github.event.action == 'labeled' &&
-        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
-        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
-        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
-        github.event.pull_request.head.repo.full_name == github.repository
-        ) ||
-        (
         github.event_name == 'workflow_dispatch' &&
         github.ref == 'refs/heads/main' &&
-        inputs.action == 'scan' &&
-        inputs.runner_pool == 'private'
-        ) ||
-        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
-      ) &&
-      (
-        (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-      )
+        inputs.action_tag == 'ci' && inputs.runner_pool_tag == 'private' &&
+        (
+          (github.actor == 'snapetech' && inputs.pr_number == '' && inputs.pr_sha == '' && inputs.pr_base_sha == '' && inputs.target_run_id == '' && inputs.pr_author == '' && inputs.pr_repository == '') ||
+          (github.actor == 'github-actions[bot]' && inputs.action_tag == 'ci' && inputs.runner_pool_tag == 'private' && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.pr_base_sha != '' && inputs.target_run_id != '' && inputs.pr_author == 'snapetech' && inputs.pr_repository == github.repository)
+        )
+      ) ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     name: Windows MinGW
     runs-on: ${{ fromJSON(format('{{"group":"packer-windows","labels":["self-hosted","Windows","X64","on-demand","packer-windows","prosperNG","gha-{0}-windows-mingw"]}}', github.run_id)) }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.pr_sha != '' && inputs.pr_sha || github.sha }}
+          persist-credentials: false
 
       - name: Set up MSYS2
         uses: msys2/setup-msys2@v2
@@ -988,25 +1041,15 @@ jobs:
     # Keep external fork code off trusted JIT groups until its isolated route is authorized.
     if: >-
       (
-        (
-        github.event_name == 'pull_request' &&
-        github.event.action == 'labeled' &&
-        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
-        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
-        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
-        github.event.pull_request.head.repo.full_name == github.repository
-        ) ||
-        (
         github.event_name == 'workflow_dispatch' &&
         github.ref == 'refs/heads/main' &&
-        inputs.action == 'scan' &&
-        inputs.runner_pool == 'private'
-        ) ||
-        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
-      ) &&
-      (
-        (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-      )
+        inputs.action_tag == 'ci' && inputs.runner_pool_tag == 'private' &&
+        (
+          (github.actor == 'snapetech' && inputs.pr_number == '' && inputs.pr_sha == '' && inputs.pr_base_sha == '' && inputs.target_run_id == '' && inputs.pr_author == '' && inputs.pr_repository == '') ||
+          (github.actor == 'github-actions[bot]' && inputs.action_tag == 'ci' && inputs.runner_pool_tag == 'private' && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.pr_base_sha != '' && inputs.target_run_id != '' && inputs.pr_author == 'snapetech' && inputs.pr_repository == github.repository)
+        )
+      ) ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     name: Windows App
     runs-on: ${{ fromJSON(format('{{"group":"packer-windows","labels":["self-hosted","Windows","X64","on-demand","packer-windows","prosperNG","gha-{0}-windows-app"]}}', github.run_id)) }}
 
@@ -1015,6 +1058,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.pr_sha != '' && inputs.pr_sha || github.sha }}
+          persist-credentials: false
 
       - name: Set up MSYS2
         uses: msys2/setup-msys2@v2
@@ -1127,25 +1173,15 @@ jobs:
     # Keep external fork code off trusted JIT groups until its isolated route is authorized.
     if: >-
       (
-        (
-        github.event_name == 'pull_request' &&
-        github.event.action == 'labeled' &&
-        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
-        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
-        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
-        github.event.pull_request.head.repo.full_name == github.repository
-        ) ||
-        (
         github.event_name == 'workflow_dispatch' &&
         github.ref == 'refs/heads/main' &&
-        inputs.action == 'scan' &&
-        inputs.runner_pool == 'private'
-        ) ||
-        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
-      ) &&
-      (
-        (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-      )
+        inputs.action_tag == 'ci' && inputs.runner_pool_tag == 'private' &&
+        (
+          (github.actor == 'snapetech' && inputs.pr_number == '' && inputs.pr_sha == '' && inputs.pr_base_sha == '' && inputs.target_run_id == '' && inputs.pr_author == '' && inputs.pr_repository == '') ||
+          (github.actor == 'github-actions[bot]' && inputs.action_tag == 'ci' && inputs.runner_pool_tag == 'private' && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.pr_base_sha != '' && inputs.target_run_id != '' && inputs.pr_author == 'snapetech' && inputs.pr_repository == github.repository)
+        )
+      ) ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     name: macOS (x86_64 / Rosetta 2)
     runs-on: ${{ fromJSON(format('{{"group":"private-apple-builds","labels":["self-hosted","macOS","ARM64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-macos","private-apple"]}}', github.run_id)) }}
 
@@ -1155,6 +1191,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.pr_sha != '' && inputs.pr_sha || github.sha }}
+          persist-credentials: false
 
       - name: Install dependencies
         # Rosetta 2 is not preinstalled on arm64 runners; it's needed to RUN the x86_64 ctest binaries
@@ -1189,25 +1228,15 @@ jobs:
     # Keep external fork code off trusted JIT groups until its isolated route is authorized.
     if: >-
       (
-        (
-        github.event_name == 'pull_request' &&
-        github.event.action == 'labeled' &&
-        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
-        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
-        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
-        github.event.pull_request.head.repo.full_name == github.repository
-        ) ||
-        (
         github.event_name == 'workflow_dispatch' &&
         github.ref == 'refs/heads/main' &&
-        inputs.action == 'scan' &&
-        inputs.runner_pool == 'private'
-        ) ||
-        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
-      ) &&
-      (
-        (github.event_name != 'schedule' && github.event_name != 'workflow_dispatch') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-      )
+        inputs.action_tag == 'ci' && inputs.runner_pool_tag == 'private' &&
+        (
+          (github.actor == 'snapetech' && inputs.pr_number == '' && inputs.pr_sha == '' && inputs.pr_base_sha == '' && inputs.target_run_id == '' && inputs.pr_author == '' && inputs.pr_repository == '') ||
+          (github.actor == 'github-actions[bot]' && inputs.action_tag == 'ci' && inputs.runner_pool_tag == 'private' && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.pr_base_sha != '' && inputs.target_run_id != '' && inputs.pr_author == 'snapetech' && inputs.pr_repository == github.repository)
+        )
+      ) ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     name: macOS App (SDL3 + MoltenVK)
     runs-on: ${{ fromJSON(format('{{"group":"private-apple-builds","labels":["self-hosted","macOS","ARM64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-macos-app","private-apple"]}}', github.run_id)) }}
 
@@ -1219,6 +1248,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.pr_sha != '' && inputs.pr_sha || github.sha }}
+          persist-credentials: false
 
       - name: Install dependencies
         run: |
@@ -1238,26 +1270,7 @@ jobs:
   release:
     name: Publish Release
     if: >-
-      (
-        (
-        github.event_name == 'pull_request' &&
-        github.event.action == 'labeled' &&
-        (github.event.label.name == 'action:ci' || github.event.label.name == 'pool:private') &&
-        contains(github.event.pull_request.labels.*.name, 'action:ci') &&
-        contains(github.event.pull_request.labels.*.name, 'pool:private') &&
-        github.event.pull_request.head.repo.full_name == github.repository
-        ) ||
-        (
-        github.event_name == 'workflow_dispatch' &&
-        github.ref == 'refs/heads/main' &&
-        inputs.action == 'scan' &&
-        inputs.runner_pool == 'private'
-        ) ||
-        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'workflow_dispatch')
-      ) &&
-      (
-        github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-      )
+      github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [linux, linux-app, linux-app-package, windows-mingw, windows-app, macos, macos-app]
     runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-release"]}}', github.run_id)) }}
     permissions:
@@ -1290,3 +1303,71 @@ jobs:
               --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
               --title "prosper $GITHUB_REF_NAME"
           fi
+
+  report-owner-pr-check:
+    name: Report trusted owner PR validation
+    needs: [host-sanitizers, host-tsan, linux, contribution-shape, docs, linux-app, linux-app-package, windows-mingw, windows-app, macos, macos-app]
+    if: >-
+      always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+      github.actor == 'github-actions[bot]' && inputs.action_tag == 'ci' && inputs.runner_pool_tag == 'private' &&
+      inputs.pr_number != '' && inputs.pr_sha != '' && inputs.pr_base_sha != '' && inputs.target_run_id != '' &&
+      inputs.pr_author == 'snapetech' && inputs.pr_repository == github.repository
+    runs-on: ${{ fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-prosperng","ng-main-run-{0}","gha-{0}-owner-pr-reporter"]}}', github.run_id)) }}
+    permissions:
+      checks: write
+      contents: none
+    steps:
+      - name: Attach validation result to the PR head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          PR_SHA: ${{ inputs.pr_sha }}
+          TARGET_RUN_ID: ${{ inputs.target_run_id }}
+          VALIDATION_RESULT: ${{ contains(needs.*.result, 'failure') && 'failure' || contains(needs.*.result, 'cancelled') && 'cancelled' || contains(needs.*.result, 'skipped') && 'failure' || 'success' }}
+          VALIDATION_RUN_ID: ${{ github.run_id }}
+        run: |
+          python3 - <<'OWNER_PR_REPORTER_PY'
+          import json
+          import os
+          import re
+          from urllib.request import Request, urlopen
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          number = os.environ["PR_NUMBER"]
+          sha = os.environ["PR_SHA"]
+          result = os.environ["VALIDATION_RESULT"]
+          run_id = os.environ["VALIDATION_RUN_ID"]
+          if not re.fullmatch(r"[1-9][0-9]*", number) or not re.fullmatch(r"[0-9a-f]{40}", sha):
+              raise SystemExit("invalid pull request identity")
+          if not re.fullmatch(r"[1-9][0-9]*", run_id):
+              raise SystemExit("invalid workflow run ID")
+          conclusion = "success" if result == "success" else ("cancelled" if result == "cancelled" else "failure")
+          payload = json.dumps({
+              "name": "ProsperNG CI owner PR",
+              "head_sha": sha,
+              "external_id": run_id,
+              "status": "completed",
+              "conclusion": conclusion,
+              "details_url": f"{os.environ['GITHUB_SERVER_URL']}/{repository}/actions/runs/{run_id}",
+              "output": {
+                  "title": "ProsperNG CI owner PR " + conclusion,
+                  "summary": "See the linked main-pinned workflow run for validation details.",
+              },
+          }).encode("utf-8")
+          request = Request(
+              f"https://api.github.com/repos/{repository}/check-runs",
+              data=payload,
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                  "Content-Type": "application/json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+              method="POST",
+          )
+          with urlopen(request, timeout=20) as response:
+              if response.status not in {201, 202}:
+                  raise SystemExit(f"check creation returned HTTP {response.status}")
+          OWNER_PR_REPORTER_PY
