@@ -136,7 +136,7 @@ jobs:
               },
           }).encode("utf-8")
           request = Request(
-              f"https://api.github.com/repos/{repository}/actions/workflows/ci.yml/dispatches",
+              "https://api.github.com/repos/snapetech-org/prosperNG/actions/workflows/ci.yml/dispatches",
               data=payload,
               headers={
                   "Accept": "application/vnd.github+json",
